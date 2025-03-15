@@ -66,12 +66,12 @@ awd_pwn_patcher = AwdPwnPatcher(binary)
   - machine_code：要添加的机器码，类型为整数列表，与assembly二选一
   - string：要修改成的字符串，也可以用来修改整数，整数需要转成字符串，该参数与汇编的两个参数二选一
 
-**patch_by_jmp(self, jmp_from, jmp_to=0, assembly="", machine_code=[])**
+**patch_by_jmp(self, jmp_from, hook_return=0, assembly="", machine_code=[])**
 
 - 作用：通过jmp指令修改原程序逻辑，使得跳转到eh_frame段处的patch代码，执行完patch代码后再跳转回去
 - 参数
   - jmp_from：地址，表示从原程序哪一条指令jmp到我们的patch代码
-  - jmp_to：地址，表示patch代码结束后，需要跳转的目标指令地址，该参数不为0的情况下，patch_by_jmp函数会自动在patch代码的最后添加jmp语句，为0默认表示用户已经在原有的assembly或machine_code中考虑了跳转情况。
+  - hook_return：地址，表示patch代码结束后，需要跳转的目标指令地址，该参数不为0的情况下，patch_by_jmp函数会自动在patch代码的最后添加jmp语句，为0默认表示用户已经在原有的assembly或machine_code中考虑了跳转情况。
   - assembly：要添加的汇编代码，与machine_code二选一
   - machine_code：要添加的机器码，类型为整数列表，与assembly二选一
 
@@ -106,7 +106,7 @@ awd_pwn_patcher = AwdPwnPatcher(binary)
 
 ### 2022-10-17
 
-- 修复patch_by_jump函数逻辑问题：当同时提供jmp_to和machine_code两个参数时，machine_code不会写入。
+- 修复patch_by_jump函数逻辑问题：当同时提供hook_return和machine_code两个参数时，machine_code不会写入。
 - 增加对python3的支持
 
 ### 2021-11-19

@@ -11,7 +11,7 @@ assembly = """
 mov r1, r3
 ldr r0, [pc, #{}]
 """.format(hex(save_fmt_addr-patch_start_addr-0xc))
-awd_pwn_patcher.patch_by_jmp(0x10900, jmp_to=0x10904, assembly=assembly)
+awd_pwn_patcher.patch_by_jmp(0x10900, hook_return=0x10904, assembly=assembly)
 
 assembly = """
 mov r2, 0x20
@@ -26,7 +26,7 @@ ldr r3, [r11, #-8]
 mov r1, 0
 str r1, [r2, r3, LSL#2]
 """.format(hex(book_ptr-patch_start_addr-8))
-awd_pwn_patcher.patch_by_jmp(0x108B4, jmp_to=0x108c0, assembly=assembly)
+awd_pwn_patcher.patch_by_jmp(0x108B4, hook_return=0x108c0, assembly=assembly)
 awd_pwn_patcher.save()
 
 # arm 32 pie
@@ -39,7 +39,7 @@ mov r1, r3
 ldr r0, [pc, #{}]
 add r0, r4, r0
 """.format(hex(save_fmt_addr-patch_start_addr-0xc))
-awd_pwn_patcher.patch_by_jmp(0xb14, jmp_to=0xb18, assembly=assembly)
+awd_pwn_patcher.patch_by_jmp(0xb14, hook_return=0xb18, assembly=assembly)
 
 assembly = """
 mov r2, 0x20
@@ -55,7 +55,7 @@ ldr r2, [r11, #-0x10]
 mov r1, 0
 str r1, [r3, r2, LSL#2]
 """.format(hex(book_ptr-patch_start_addr-8))
-awd_pwn_patcher.patch_by_jmp(0xaa8, jmp_to=0xabc, assembly=assembly)
+awd_pwn_patcher.patch_by_jmp(0xaa8, hook_return=0xabc, assembly=assembly)
 awd_pwn_patcher.save()
 
 # arm 64
@@ -69,7 +69,7 @@ adrp x0, #label
 label:
 add x0, x0, {}
 """.format(hex(fmt_addr&0xfff))
-awd_pwn_patcher.patch_by_jmp(0xd50, jmp_to=0xd54, assembly=assembly)
+awd_pwn_patcher.patch_by_jmp(0xd50, hook_return=0xd54, assembly=assembly)
 
 assembly = """
 mov x2, 0x20
@@ -89,5 +89,5 @@ ldrsw x1, [x29,#0x1c]
 mov x2, 0
 str x2, [x0, x1, LSL#3]
 """.format(book_ptr&0xfff)
-awd_pwn_patcher.patch_by_jmp(0xd0c, jmp_to=0xd1c, assembly=assembly)
+awd_pwn_patcher.patch_by_jmp(0xd0c, hook_return=0xd1c, assembly=assembly)
 awd_pwn_patcher.save()

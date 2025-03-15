@@ -149,20 +149,22 @@ class AwdPwnPatcher:
         self.patch_by_call(call_from, assembly=assembly)
 
     def patch_origin(self, start, end=0, assembly="", machine_code=[], string=""):
-        log.info(f"Patching origin at {hex(start)}")
+        log.debug(f"Patch original bytes at {hex(start)}")
+
         if len(assembly) != 0:
-            log.debug(f"Assembling code:\n{assembly}")
+            log.debug(f"  Generating shellcode:\n{assembly}")
             shellcode, count = self.ks.asm(assembly, addr=start)
             shellcode = "".join([chr(x) for x in shellcode])
         elif len(machine_code) != 0:
-            log.debug(f"Using provided machine code of length {len(machine_code)}")
+            log.debug(f"  Using provided machine code of length {len(machine_code)}")
             shellcode = "".join([chr(x) for x in machine_code])
         elif len(string) != 0:
-            log.debug(f"Using provided string of length {len(string)}")
+            log.debug(f"  Using provided string of length {len(string)}")
             shellcode = string
         else:
-            log.warning("No patch content provided")
+            log.warning("  No patch content provided")
             shellcode = ""
+
         if end != 0:
             assert (len(shellcode) <= (end - start))
             shellcode = shellcode.ljust(end - start, "\x90")
@@ -170,18 +172,18 @@ class AwdPwnPatcher:
             shellcode = shellcode.encode("latin-1")
         self.binary.write(start, shellcode)
 
-    def patch_by_jmp(self, hook_from, hook_to=0, assembly="", machine_code=[]):
+    def patch_by_jmp(self, hook_from, hook_return=0, assembly="", machine_code=[]):
         """
         参数:
             hook_from: Hook开始地址
-            hook_to: Hook结束地址（可选）
+            hook_return: Hook结束地址（可选）
             assembly: 要插入的汇编代码（可选）
             machine_code: 要插入的原始机器码（可选）
 
         返回:
             插入补丁的地址，失败时返回0
         """
-        log.info(f"Patching by jump at {hex(hook_from)}")
+        log.info(f"Hook instructions at {hex(hook_from)}, return to {hex(hook_return)}")
         if self.arch == "i386" or self.arch == "amd64":
             jmp_ins = "jmp"
         elif self.arch == "arm" or self.arch == "aarch64":
@@ -191,8 +193,8 @@ class AwdPwnPatcher:
                 jmp_ins = "b"
             else:
                 jmp_ins = "j"
-        if hook_to:
-            payload = "{} {}".format(jmp_ins, hex(hook_to))
+        if hook_return:
+            payload = "{} {}".format(jmp_ins, hex(hook_return))
             if len(assembly) != 0:
                 assembly += "\n" + payload
             else:
@@ -200,13 +202,13 @@ class AwdPwnPatcher:
                 shellcode, count = self.ks.asm(payload, addr=addr)
                 machine_code += shellcode
         patch_start_addr = self.add_patch_in_ehframe(assembly=assembly, machine_code=machine_code)
-        if hook_to:
+        if hook_return:
             # fix translation bug of mips jump code: when keystone translates jmp code, it treats the value of argument start as the base address,
             # rather than the address of jump code.
             # FYI: shellcode, count = self.ks.asm(assembly, addr=patch_start_addr)
             if self.arch == "mips" or self.arch == "mips64":
                 next_patch_addr = self._get_next_patch_start_addr()
-                payload = "{} {}".format(jmp_ins, hex(hook_to))
+                payload = "{} {}".format(jmp_ins, hex(hook_return))
                 # why - 8? because a nop code will be added automatically after jmp code.
                 log.debug(f"Fixing MIPS jump at {hex(next_patch_addr - 8)}")
                 self.patch_origin(next_patch_addr - 8, assembly=payload)
@@ -214,8 +216,9 @@ class AwdPwnPatcher:
         if patch_start_addr == 0:
             log.warning("Failed to add patch in ehframe")
             return 0
+
         payload = "{} {}".format(jmp_ins, hex(patch_start_addr))
-        log.debug(f"Generated jump payload: {payload}")
+        log.info(f"  Patch jump instruction at {hex(hook_from)} with `{payload}`")
         self.patch_origin(hook_from, assembly=payload)
         return patch_start_addr
 
@@ -224,7 +227,7 @@ class AwdPwnPatcher:
     ###############
 
     def adjust_eh_frame_size(self):
-        log.info(f"Original .eh_frame size: {self.eh_frame_size:#x}")
+        log.debug(f"Try adjusting .eh_frame size, original size: {self.eh_frame_size:#x}")
 
         if self.arch == "arm" or self.arch == "aarch64" or self.arch == "mips" or self.arch == "mips64":
             PAGE_SIZE = 0x1000
@@ -273,27 +276,36 @@ class AwdPwnPatcher:
             self.bin_file.close()
             self.binary = ELF(self.save_path)
 
-            log.success(f"Successfully adjusted .eh_frame size")
-            log.info(f"Old .eh_frame size: {self.old_eh_frame_size:#x}")
-            log.info(f"New .eh_frame size: {self.eh_frame_size:#x}")
+            log.info(f"  Old .eh_frame size: {self.old_eh_frame_size:#x}")
+            log.info(f"  New .eh_frame size: {self.eh_frame_size:#x}")
+            log.success(f"  Successfully adjusted .eh_frame size")
 
     def add_patch_in_ehframe(self, assembly="", machine_code=[]):
         patch_start_addr = self.eh_frame_addr + self.offset
+        log.debug(f"Adding .eh_frame patch at {hex(patch_start_addr)}")
+
         if len(assembly) != 0:
+            log.debug(f"  Generating shellcode:\n{assembly}")
             shellcode, count = self.ks.asm(assembly, addr=patch_start_addr)
             shellcode = "".join([chr(x) for x in shellcode])
         elif len(machine_code) != 0:
+            log.debug(f"  Using provided machine code: {len(shellcode)} bytes")
             shellcode = "".join([chr(x) for x in machine_code])
         else:
+            log.warning("  No assembly or machine code provided")
             shellcode = ""
 
         if len(shellcode) == 0:
+            log.warning("  Empty shellcode, returning 0")
             return 0
 
         self.offset += len(shellcode)
+        log.debug(f"  New offset in .eh_frame: {hex(self.offset)}")
         assert (self.offset <= self.eh_frame_size)
+
         if PYTHON_VERSION == 3:
             shellcode = shellcode.encode("latin-1")
+
         self.binary.write(patch_start_addr, shellcode)
         return patch_start_addr
 
@@ -306,6 +318,7 @@ class AwdPwnPatcher:
         return patch_start_addr
 
     def _eh_frame_add_execute_permission(self):
+        log.info("Adding execute permission to .eh_frame segment")
         text_base = self.binary.address
         e_phnum = self.binary.header.e_phnum
         e_phoff = self.binary.header.e_phoff
@@ -315,14 +328,14 @@ class AwdPwnPatcher:
             phdr = self.binary.get_segment(i).header
             # print(phdr.p_type)
             if phdr.p_type in ["PT_GNU_EH_FRAME"]:
-                log.info(f"Found PT_GNU_EH_FRAME segment at index {i}")
+                log.info(f"  Found PT_GNU_EH_FRAME segment at index {i}")
                 log.info(f"    Original flags: {phdr.p_flags:#x}")
                 flags = phdr.p_flags | P_FLAGS.PF_X
                 log.info(f"    New flags: {flags:#x}")
                 flag_bytes = bytes([flags]) if PYTHON_VERSION == 3 else chr(flags)
                 # print(hex(e_phoff + phdr_size * i + p_flags_offset), flag_bytes)
                 self.binary.write(text_base + e_phoff + phdr_size * i + p_flags_offset, flag_bytes)
-                log.success("Successfully added execute permission to .eh_frame segment")
+                log.success("  Successfully added execute permission to .eh_frame segment")
                 return
 
     def _eh_frame_fix_flags(self):
@@ -341,15 +354,15 @@ class AwdPwnPatcher:
                 page_end = int(page_end)
 
             if phdr.p_type == "PT_LOAD" and page_start <= self.eh_frame_addr and page_end >= self.eh_frame_addr + self.eh_frame_size:
-                log.info(f"Found matching PT_LOAD segment at index {i}\n"
+                log.info(f"  Found matching PT_LOAD segment at index {i}\n"
                          f"    Memory Layout:\n"
-                         f"        Page range:       {hex(page_start)} - {hex(page_end)}\n"
-                         f"        .eh_frame range:  {hex(self.eh_frame_addr)} - {hex(self.eh_frame_addr + self.eh_frame_size)}\n"
+                         f"      Page range:       {hex(page_start)} - {hex(page_end)}\n"
+                         f"      .eh_frame range:  {hex(self.eh_frame_addr)} - {hex(self.eh_frame_addr + self.eh_frame_size)}\n"
                          f"    Segment Flags:\n"
-                         f"        Original: {phdr.p_flags:#x}")
+                         f"      Original: {phdr.p_flags:#x}")
 
                 flags = chr(phdr.p_flags | 1)
                 if PYTHON_VERSION == 3:
                     flags = flags.encode("latin-1")
                 self.binary.write(e_phoff + phdr_size * i + p_flags_offset, flags)
-                log.success(f"Successfully updated flags to {phdr.p_flags | 1:#x}")
+                log.success(f"  Successfully updated flags to {phdr.p_flags | 1:#x}")

@@ -11,7 +11,7 @@ lw $v0, 0($v0)
 move $a1, $v0
 li $a0, {}
 """.format(hex(fmt_addr))
-awd_pwn_patcher.patch_by_jmp(0x400E38, jmp_to=0x400E40, assembly=assembly)
+awd_pwn_patcher.patch_by_jmp(0x400E38, hook_return=0x400E40, assembly=assembly)
 
 assembly = """
 li $a2, 0x20
@@ -25,7 +25,7 @@ sll $v0, 2
 addu $v0, $v1, $v0
 sw $zero, 0($v0)
 """
-awd_pwn_patcher.patch_by_jmp(0x400Da0, jmp_to=0x400dc4, assembly=assembly)
+awd_pwn_patcher.patch_by_jmp(0x400Da0, hook_return=0x400dc4, assembly=assembly)
 awd_pwn_patcher.save()
 
 
@@ -39,7 +39,7 @@ lw $a0, -{}($gp)
 addu $a0, $a0, $gp
 subu $a0, $a0, 0x1a030
 """.format(hex(0x1a030-save_fmt_addr))
-awd_pwn_patcher.patch_by_jmp(0x1004, jmp_to=0x100c, assembly=assembly)
+awd_pwn_patcher.patch_by_jmp(0x1004, hook_return=0x100c, assembly=assembly)
 
 assembly = """
 li $a2, 0x20
@@ -53,7 +53,7 @@ sll $v0, 2
 addu $v0, $v1, $v0
 sw $zero, 0($v0)
 """
-awd_pwn_patcher.patch_by_jmp(0xf60, jmp_to=0xf84, assembly=assembly)
+awd_pwn_patcher.patch_by_jmp(0xf60, hook_return=0xf84, assembly=assembly)
 awd_pwn_patcher.save()
 
 # 64 mips
@@ -68,7 +68,7 @@ dsubu $a0, 0x5000
 dsubu $a0, 0x5030
 daddiu $a0, $a0, {}
 """.format(hex(fmt_addr))
-awd_pwn_patcher.patch_by_jmp(0x13f0, jmp_to=0x13f8, assembly=assembly)
+awd_pwn_patcher.patch_by_jmp(0x13f0, hook_return=0x13f8, assembly=assembly)
 
 assembly = """
 li $a2, 0x20
@@ -82,5 +82,5 @@ dsll $v0, 3
 daddu $v0, $v1, $v0
 sw $zero, 0($v0)
 """
-awd_pwn_patcher.patch_by_jmp(0x1354, jmp_to=0x1374, assembly=assembly)
+awd_pwn_patcher.patch_by_jmp(0x1354, hook_return=0x1374, assembly=assembly)
 awd_pwn_patcher.save()

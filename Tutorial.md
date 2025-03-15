@@ -89,7 +89,7 @@ push dword ptr [ebp - 0xc]
 lea eax, dword ptr [{}]
 push eax
 """.format(fmt_addr)
-awd_pwn_patcher.patch_by_jmp(0x80484c5, jmp_to=0x80484cb, assembly=assembly)
+awd_pwn_patcher.patch_by_jmp(0x80484c5, hook_return=0x80484cb, assembly=assembly)
 assembly = "add esp, 0x14"
 awd_pwn_patcher.patch_origin(0x80484d0, assembly=assembly)
 awd_pwn_patcher.save()
@@ -151,7 +151,7 @@ sub esp, 0xc
 push dword ptr [ebp - 0xc]
 push eax
 """.format(hex(patch_start_addr+5), fmt_offset)
-awd_pwn_patcher.patch_by_jmp(0x5bc, jmp_to=0x5c2, assembly=assembly)
+awd_pwn_patcher.patch_by_jmp(0x5bc, hook_return=0x5c2, assembly=assembly)
 assembly = "add esp, 0x14"
 awd_pwn_patcher.patch_origin(0x5c7, assembly=assembly)
 awd_pwn_patcher.save()
@@ -191,7 +191,7 @@ assembly = """
 mov rsi, qword ptr [rbp-0x8]
 lea rdi, qword ptr [{}]
 """.format(hex(fmt_offset))
-awd_pwn_patcher.patch_by_jmp(0x706, jmp_to=0x712, assembly=assembly)
+awd_pwn_patcher.patch_by_jmp(0x706, hook_return=0x712, assembly=assembly)
 awd_pwn_patcher.save()
 ```
 
@@ -271,7 +271,7 @@ mov eax, 0x804a060
 lea eax, dword ptr [eax + edx*4]
 mov dword ptr [eax], 0
 """
-awd_pwn_patcher.patch_by_jmp(0x80485bf, jmp_to=0x80485c7, assembly=assembly)
+awd_pwn_patcher.patch_by_jmp(0x80485bf, hook_return=0x80485c7, assembly=assembly)
 awd_pwn_patcher.save()
 ```
 
@@ -322,7 +322,7 @@ lea rdx, qword ptr [0x201040]
 lea rax, qword ptr [rdx + rax*8]
 mov qword ptr [rax], 0
 """
-awd_pwn_patcher.patch_by_jmp(0x838, jmp_to=0x83d, assembly=assembly)
+awd_pwn_patcher.patch_by_jmp(0x838, hook_return=0x83d, assembly=assembly)
 awd_pwn_patcher.save()
 ```
 
