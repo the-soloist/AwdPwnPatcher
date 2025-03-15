@@ -3,12 +3,13 @@
 
 from pwn import *
 from AwdPwnPatcher import *
-import lief
 
 
 binary = "./vuln64"
 patcher = AwdPwnPatcher(binary)
+
 fmt_offset = patcher.add_constant_in_ehframe("%s\x00\x00")
+
 assembly = """
 mov rsi, rax
 lea rdi, qword ptr [{}]
@@ -26,5 +27,6 @@ mov rdi, qword ptr [rax]
 mov qword ptr [rax], 0
 """
 patcher.patch_by_jmp(0xb7e, jmp_to=0xb85, assembly=assembly)
+
 patcher._eh_frame_add_execute_permission()
 patcher.save()

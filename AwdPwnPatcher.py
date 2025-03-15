@@ -76,10 +76,13 @@ class AwdPwnPatcher:
         return self.eh_frame_addr + self.offset
 
     def patch_file(self, offset, content, save_path=""):
+        log.info(f"Patching file at offset {hex(offset)} with {len(content)} bytes")
         if len(save_path) != 0:
+            log.debug(f"Saving patched file to {save_path}")
             shutil.copy2(self.path, save_path)
             self.bin_file = open(save_path, "rb+")
         else:
+            log.debug(f"Saving patched file to {self.save_path}")
             shutil.copy2(self.path, self.save_path)
             self.bin_file = open(self.save_path, "rb+")
         self.bin_file.seek(offset)
@@ -87,18 +90,22 @@ class AwdPwnPatcher:
         self.bin_file.close()
 
     def patch_by_call(self, call_from, assembly="", machine_code=[]):
+        log.info(f"Patching by call at {hex(call_from)}")
         if self.arch != "i386" and self.arch != "amd64":
             log.error("Sorry, patch_by_call only support x86 architecture!")
             quit()
         patch_start_addr = self.add_patch_in_ehframe(assembly=assembly, machine_code=machine_code)
         if patch_start_addr == 0:
+            log.warning("Failed to add patch in ehframe")
             return 0
 
         payload = "call {}".format(hex(patch_start_addr))
+        log.debug(f"Generated call payload: {payload}")
         self.patch_origin(call_from, assembly=payload)
         return patch_start_addr
 
     def patch_fmt_by_call(self, call_from):
+        log.info(f"Patching format string by call at {hex(call_from)}")
         if self.arch != "i386" and self.arch != "amd64":
             log.error("Sorry, patch_fmt_by_call only support x86 architecture!")
             quit()
@@ -106,6 +113,8 @@ class AwdPwnPatcher:
         patch_start_addr = self.eh_frame_addr + self.offset
 
         printf_addr = (call_from + 5 + u32(self.binary.read(call_from + 1, 4))) & 0xffffffff
+        log.debug(f"Calculated printf address: {hex(printf_addr)}")
+
         if self.bits == 32 and not self.pie:
             assembly = """
             mov eax, dword ptr [esp+4]
@@ -136,17 +145,23 @@ class AwdPwnPatcher:
             call {1}
             ret
             """.format(hex(fmt_addr), hex(printf_addr))
+        log.debug(f"Generated assembly:\n{assembly}")
         self.patch_by_call(call_from, assembly=assembly)
 
     def patch_origin(self, start, end=0, assembly="", machine_code=[], string=""):
+        log.info(f"Patching origin at {hex(start)}")
         if len(assembly) != 0:
+            log.debug(f"Assembling code:\n{assembly}")
             shellcode, count = self.ks.asm(assembly, addr=start)
             shellcode = "".join([chr(x) for x in shellcode])
         elif len(machine_code) != 0:
+            log.debug(f"Using provided machine code of length {len(machine_code)}")
             shellcode = "".join([chr(x) for x in machine_code])
         elif len(string) != 0:
+            log.debug(f"Using provided string of length {len(string)}")
             shellcode = string
         else:
+            log.warning("No patch content provided")
             shellcode = ""
         if end != 0:
             assert (len(shellcode) <= (end - start))
@@ -156,6 +171,7 @@ class AwdPwnPatcher:
         self.binary.write(start, shellcode)
 
     def patch_by_jmp(self, jmp_from, jmp_to=0, assembly="", machine_code=[]):
+        log.info(f"Patching by jump at {hex(jmp_from)}")
         if self.arch == "i386" or self.arch == "amd64":
             jmp_ins = "jmp"
         elif self.arch == "arm" or self.arch == "aarch64":
@@ -182,11 +198,14 @@ class AwdPwnPatcher:
                 next_patch_addr = self._get_next_patch_start_addr()
                 payload = "{} {}".format(jmp_ins, hex(jmp_to))
                 # why - 8? because a nop code will be added automatically after jmp code.
+                log.debug(f"Fixing MIPS jump at {hex(next_patch_addr - 8)}")
                 self.patch_origin(next_patch_addr - 8, assembly=payload)
 
         if patch_start_addr == 0:
+            log.warning("Failed to add patch in ehframe")
             return 0
         payload = "{} {}".format(jmp_ins, hex(patch_start_addr))
+        log.debug(f"Generated jump payload: {payload}")
         self.patch_origin(jmp_from, assembly=payload)
         return patch_start_addr
 
