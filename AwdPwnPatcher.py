@@ -170,8 +170,18 @@ class AwdPwnPatcher:
             shellcode = shellcode.encode("latin-1")
         self.binary.write(start, shellcode)
 
-    def patch_by_jmp(self, jmp_from, jmp_to=0, assembly="", machine_code=[]):
-        log.info(f"Patching by jump at {hex(jmp_from)}")
+    def patch_by_jmp(self, hook_from, hook_to=0, assembly="", machine_code=[]):
+        """
+        参数:
+            hook_from: Hook开始地址
+            hook_to: Hook结束地址（可选）
+            assembly: 要插入的汇编代码（可选）
+            machine_code: 要插入的原始机器码（可选）
+
+        返回:
+            插入补丁的地址，失败时返回0
+        """
+        log.info(f"Patching by jump at {hex(hook_from)}")
         if self.arch == "i386" or self.arch == "amd64":
             jmp_ins = "jmp"
         elif self.arch == "arm" or self.arch == "aarch64":
@@ -181,8 +191,8 @@ class AwdPwnPatcher:
                 jmp_ins = "b"
             else:
                 jmp_ins = "j"
-        if jmp_to:
-            payload = "{} {}".format(jmp_ins, hex(jmp_to))
+        if hook_to:
+            payload = "{} {}".format(jmp_ins, hex(hook_to))
             if len(assembly) != 0:
                 assembly += "\n" + payload
             else:
@@ -190,13 +200,13 @@ class AwdPwnPatcher:
                 shellcode, count = self.ks.asm(payload, addr=addr)
                 machine_code += shellcode
         patch_start_addr = self.add_patch_in_ehframe(assembly=assembly, machine_code=machine_code)
-        if jmp_to:
+        if hook_to:
             # fix translation bug of mips jump code: when keystone translates jmp code, it treats the value of argument start as the base address,
             # rather than the address of jump code.
             # FYI: shellcode, count = self.ks.asm(assembly, addr=patch_start_addr)
             if self.arch == "mips" or self.arch == "mips64":
                 next_patch_addr = self._get_next_patch_start_addr()
-                payload = "{} {}".format(jmp_ins, hex(jmp_to))
+                payload = "{} {}".format(jmp_ins, hex(hook_to))
                 # why - 8? because a nop code will be added automatically after jmp code.
                 log.debug(f"Fixing MIPS jump at {hex(next_patch_addr - 8)}")
                 self.patch_origin(next_patch_addr - 8, assembly=payload)
@@ -206,7 +216,7 @@ class AwdPwnPatcher:
             return 0
         payload = "{} {}".format(jmp_ins, hex(patch_start_addr))
         log.debug(f"Generated jump payload: {payload}")
-        self.patch_origin(jmp_from, assembly=payload)
+        self.patch_origin(hook_from, assembly=payload)
         return patch_start_addr
 
     ###############
