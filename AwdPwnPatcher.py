@@ -72,7 +72,7 @@ class AwdPwnPatcher:
     ### patch ###
     #############
 
-    def get_next_patch_start_addr(self):
+    def _get_next_patch_start_addr(self):
         return self.eh_frame_addr + self.offset
 
     def patch_file(self, offset, content, save_path=""):
@@ -170,7 +170,7 @@ class AwdPwnPatcher:
             if len(assembly) != 0:
                 assembly += "\n" + payload
             else:
-                addr = self.get_next_patch_start_addr() + len(machine_code)
+                addr = self._get_next_patch_start_addr() + len(machine_code)
                 shellcode, count = self.ks.asm(payload, addr=addr)
                 machine_code += shellcode
         patch_start_addr = self.add_patch_in_ehframe(assembly=assembly, machine_code=machine_code)
@@ -179,7 +179,7 @@ class AwdPwnPatcher:
             # rather than the address of jump code.
             # FYI: shellcode, count = self.ks.asm(assembly, addr=patch_start_addr)
             if self.arch == "mips" or self.arch == "mips64":
-                next_patch_addr = self.get_next_patch_start_addr()
+                next_patch_addr = self._get_next_patch_start_addr()
                 payload = "{} {}".format(jmp_ins, hex(jmp_to))
                 # why - 8? because a nop code will be added automatically after jmp code.
                 self.patch_origin(next_patch_addr - 8, assembly=payload)
