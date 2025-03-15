@@ -25,7 +25,7 @@ class AwdPwnPatcher:
         self.endian = self.binary.endian
         self.arch = self.binary.arch
         if self.bits != 32 and self.bits != 64:
-            print("Sorry, the architecture of program is neither 32-bit or 64-bit.")
+            log.error("Sorry, the architecture of program is neither 32-bit or 64-bit.")
             quit()
         if self.arch == "arm":
             self.ks_arch = keystone.KS_ARCH_ARM
@@ -56,6 +56,8 @@ class AwdPwnPatcher:
             self.adjust_eh_frame_size()
 
     def adjust_eh_frame_size(self):
+        log.info(f"Original .eh_frame size: {self.eh_frame_size:#x}")
+
         if self.arch == "arm" or self.arch == "aarch64" or self.arch == "mips" or self.arch == "mips64":
             PAGE_SIZE = 0x1000
             for i in range(self.binary.num_sections()):
@@ -103,8 +105,9 @@ class AwdPwnPatcher:
             self.bin_file.close()
             self.binary = ELF(self.save_path)
 
-            print("old eh_frame_size: %#x" % self.old_eh_frame_size)
-        print("eh_frame_size: %#x" % self.eh_frame_size)
+            log.success(f"Successfully adjusted .eh_frame size")
+            log.info(f"Old .eh_frame size: {self.old_eh_frame_size:#x}")
+            log.info(f"New .eh_frame size: {self.eh_frame_size:#x}")
 
     def patch_file(self, offset, content, save_path=""):
         if len(save_path) != 0:
@@ -196,7 +199,7 @@ class AwdPwnPatcher:
 
     def patch_by_call(self, call_from, assembly="", machine_code=[]):
         if self.arch != "i386" and self.arch != "amd64":
-            print("Sorry, patch_by_call only support x86 architecture!")
+            log.error("Sorry, patch_by_call only support x86 architecture!")
             quit()
         patch_start_addr = self.add_patch_in_ehframe(assembly=assembly, machine_code=machine_code)
         if patch_start_addr == 0:
@@ -216,7 +219,7 @@ class AwdPwnPatcher:
 
     def patch_fmt_by_call(self, call_from):
         if self.arch != "i386" and self.arch != "amd64":
-            print("Sorry, patch_fmt_by_call only support x86 architecture!")
+            log.error("Sorry, patch_fmt_by_call only support x86 architecture!")
             quit()
         fmt_addr = self.add_constant_in_ehframe("%s\x00\x00")
         patch_start_addr = self.eh_frame_addr + self.offset
@@ -277,16 +280,22 @@ class AwdPwnPatcher:
         for i in range(e_phnum):
             phdr = self.binary.get_segment(i).header
             if phdr.p_type == "PT_GNU_EH_FRAME":
+                log.info(f"Found PT_GNU_EH_FRAME segment at index {i}")
+                log.info(f"    Original flags: {phdr.p_flags:#x}")
                 flags = phdr.p_flags | P_FLAGS.PF_X
+                log.info(f"    New flags: {flags:#x}")
                 flag_bytes = bytes([flags]) if PYTHON_VERSION == 3 else chr(flags)
                 self.binary.write(e_phoff + phdr_size * i + p_flags_offset, flag_bytes)
-                return  # Exit after patching the eh_frame segment
+                log.success("Successfully added execute permission to .eh_frame segment")
+                return
 
     def _eh_frame_fix_flags(self):
         e_phnum = self.binary.header.e_phnum
         e_phoff = self.binary.header.e_phoff
         phdr_size = 32 if self.bits == 32 else 56
         p_flags_offset = 24 if self.bits == 32 else 4
+        log.info(f"Scanning {e_phnum} program headers for .eh_frame segment")
+
         for i in range(0, e_phnum):
             phdr = self.binary.get_segment(i).header
             page_start = int((phdr.p_vaddr / 0x1000) * 0x1000)
@@ -294,10 +303,17 @@ class AwdPwnPatcher:
             if page_end % 0x1000 != 0:
                 page_end = (page_end / 0x1000) * 0x1000 + 0x1000
                 page_end = int(page_end)
+
             if phdr.p_type == "PT_LOAD" and page_start <= self.eh_frame_addr and page_end >= self.eh_frame_addr + self.eh_frame_size:
-                print("fix_eh_frame_flags:\npage_start: {} page_end: {} eh_frame_addr: {} eh_frame_size: {} origin phdr.p_flags: {}"
-                      .format(hex(page_start), hex(page_end), hex(self.eh_frame_addr), hex(self.eh_frame_size), str(phdr.p_flags)))
+                log.info(f"Found matching PT_LOAD segment at index {i}\n"
+                         f"    Memory Layout:\n"
+                         f"        Page range:       {hex(page_start)} - {hex(page_end)}\n"
+                         f"        .eh_frame range:  {hex(self.eh_frame_addr)} - {hex(self.eh_frame_addr + self.eh_frame_size)}\n"
+                         f"    Segment Flags:\n"
+                         f"        Original: {phdr.p_flags:#x}")
+
                 flags = chr(phdr.p_flags | 1)
                 if PYTHON_VERSION == 3:
                     flags = flags.encode("latin-1")
                 self.binary.write(e_phoff + phdr_size * i + p_flags_offset, flags)
+                log.success(f"Successfully updated flags to {phdr.p_flags | 1:#x}")
