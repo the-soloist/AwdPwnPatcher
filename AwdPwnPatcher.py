@@ -55,6 +55,145 @@ class AwdPwnPatcher:
         if adjust_eh_frame_size:
             self.adjust_eh_frame_size()
 
+    def generate_shellcode(self, assembly, base_addr):
+        shellcode, count = self.ks.asm(assembly, addr=base_addr)
+        shellcode = "".join([chr(x) for x in shellcode])
+        return shellcode
+
+    def save(self, save_path="", fix_eh_frame_flags=True):
+        if fix_eh_frame_flags:
+            self._eh_frame_fix_flags()
+        if len(save_path) != 0:
+            self.binary.save(save_path)
+        else:
+            self.binary.save(self.save_path)
+
+    #############
+    ### patch ###
+    #############
+
+    def get_next_patch_start_addr(self):
+        return self.eh_frame_addr + self.offset
+
+    def patch_file(self, offset, content, save_path=""):
+        if len(save_path) != 0:
+            shutil.copy2(self.path, save_path)
+            self.bin_file = open(save_path, "rb+")
+        else:
+            shutil.copy2(self.path, self.save_path)
+            self.bin_file = open(self.save_path, "rb+")
+        self.bin_file.seek(offset)
+        self.bin_file.write(content)
+        self.bin_file.close()
+
+    def patch_by_call(self, call_from, assembly="", machine_code=[]):
+        if self.arch != "i386" and self.arch != "amd64":
+            log.error("Sorry, patch_by_call only support x86 architecture!")
+            quit()
+        patch_start_addr = self.add_patch_in_ehframe(assembly=assembly, machine_code=machine_code)
+        if patch_start_addr == 0:
+            return 0
+
+        payload = "call {}".format(hex(patch_start_addr))
+        self.patch_origin(call_from, assembly=payload)
+        return patch_start_addr
+
+    def patch_fmt_by_call(self, call_from):
+        if self.arch != "i386" and self.arch != "amd64":
+            log.error("Sorry, patch_fmt_by_call only support x86 architecture!")
+            quit()
+        fmt_addr = self.add_constant_in_ehframe("%s\x00\x00")
+        patch_start_addr = self.eh_frame_addr + self.offset
+
+        printf_addr = (call_from + 5 + u32(self.binary.read(call_from + 1, 4))) & 0xffffffff
+        if self.bits == 32 and not self.pie:
+            assembly = """
+            mov eax, dword ptr [esp+4]
+            push eax
+            lea eax, dword ptr [{0}]
+            push eax
+            call {1}
+            add esp, 0x8
+            ret
+            """.format(hex(fmt_addr), hex(printf_addr))
+        elif self.bits == 32 and self.pie:
+            assembly = """
+            call {0}
+            mov eax, dword ptr [esp+8]
+            push eax
+            mov eax, dword ptr [esp+4]
+            sub eax, {0}
+            add eax, {1}
+            push eax
+            call {2}
+            add esp, 0xc
+            ret
+            """.format(hex(patch_start_addr + 5), fmt_addr, hex(printf_addr))
+        else:
+            assembly = """
+            mov rsi, rdi
+            lea rdi, qword ptr [{0}]
+            call {1}
+            ret
+            """.format(hex(fmt_addr), hex(printf_addr))
+        self.patch_by_call(call_from, assembly=assembly)
+
+    def patch_origin(self, start, end=0, assembly="", machine_code=[], string=""):
+        if len(assembly) != 0:
+            shellcode, count = self.ks.asm(assembly, addr=start)
+            shellcode = "".join([chr(x) for x in shellcode])
+        elif len(machine_code) != 0:
+            shellcode = "".join([chr(x) for x in machine_code])
+        elif len(string) != 0:
+            shellcode = string
+        else:
+            shellcode = ""
+        if end != 0:
+            assert (len(shellcode) <= (end - start))
+            shellcode = shellcode.ljust(end - start, "\x90")
+        if PYTHON_VERSION == 3:
+            shellcode = shellcode.encode("latin-1")
+        self.binary.write(start, shellcode)
+
+    def patch_by_jmp(self, jmp_from, jmp_to=0, assembly="", machine_code=[]):
+        if self.arch == "i386" or self.arch == "amd64":
+            jmp_ins = "jmp"
+        elif self.arch == "arm" or self.arch == "aarch64":
+            jmp_ins = "b"
+        elif self.arch == "mips" or self.arch == "mips64":
+            if self.pie:
+                jmp_ins = "b"
+            else:
+                jmp_ins = "j"
+        if jmp_to:
+            payload = "{} {}".format(jmp_ins, hex(jmp_to))
+            if len(assembly) != 0:
+                assembly += "\n" + payload
+            else:
+                addr = self.get_next_patch_start_addr() + len(machine_code)
+                shellcode, count = self.ks.asm(payload, addr=addr)
+                machine_code += shellcode
+        patch_start_addr = self.add_patch_in_ehframe(assembly=assembly, machine_code=machine_code)
+        if jmp_to:
+            # fix translation bug of mips jump code: when keystone translates jmp code, it treats the value of argument start as the base address,
+            # rather than the address of jump code.
+            # FYI: shellcode, count = self.ks.asm(assembly, addr=patch_start_addr)
+            if self.arch == "mips" or self.arch == "mips64":
+                next_patch_addr = self.get_next_patch_start_addr()
+                payload = "{} {}".format(jmp_ins, hex(jmp_to))
+                # why - 8? because a nop code will be added automatically after jmp code.
+                self.patch_origin(next_patch_addr - 8, assembly=payload)
+
+        if patch_start_addr == 0:
+            return 0
+        payload = "{} {}".format(jmp_ins, hex(patch_start_addr))
+        self.patch_origin(jmp_from, assembly=payload)
+        return patch_start_addr
+
+    ###############
+    ### section ###
+    ###############
+
     def adjust_eh_frame_size(self):
         log.info(f"Original .eh_frame size: {self.eh_frame_size:#x}")
 
@@ -109,22 +248,6 @@ class AwdPwnPatcher:
             log.info(f"Old .eh_frame size: {self.old_eh_frame_size:#x}")
             log.info(f"New .eh_frame size: {self.eh_frame_size:#x}")
 
-    def patch_file(self, offset, content, save_path=""):
-        if len(save_path) != 0:
-            shutil.copy2(self.path, save_path)
-            self.bin_file = open(save_path, "rb+")
-        else:
-            shutil.copy2(self.path, self.save_path)
-            self.bin_file = open(self.save_path, "rb+")
-        self.bin_file.seek(offset)
-        self.bin_file.write(content)
-        self.bin_file.close()
-
-    def generate_shellcode(self, assembly, base_addr):
-        shellcode, count = self.ks.asm(assembly, addr=base_addr)
-        shellcode = "".join([chr(x) for x in shellcode])
-        return shellcode
-
     def add_patch_in_ehframe(self, assembly="", machine_code=[]):
         patch_start_addr = self.eh_frame_addr + self.offset
         if len(assembly) != 0:
@@ -145,70 +268,6 @@ class AwdPwnPatcher:
         self.binary.write(patch_start_addr, shellcode)
         return patch_start_addr
 
-    def patch_origin(self, start, end=0, assembly="", machine_code=[], string=""):
-        if len(assembly) != 0:
-            shellcode, count = self.ks.asm(assembly, addr=start)
-            shellcode = "".join([chr(x) for x in shellcode])
-        elif len(machine_code) != 0:
-            shellcode = "".join([chr(x) for x in machine_code])
-        elif len(string) != 0:
-            shellcode = string
-        else:
-            shellcode = ""
-        if end != 0:
-            assert (len(shellcode) <= (end - start))
-            shellcode = shellcode.ljust(end - start, "\x90")
-        if PYTHON_VERSION == 3:
-            shellcode = shellcode.encode("latin-1")
-        self.binary.write(start, shellcode)
-
-    def patch_by_jmp(self, jmp_from, jmp_to=0, assembly="", machine_code=[]):
-        if self.arch == "i386" or self.arch == "amd64":
-            jmp_ins = "jmp"
-        elif self.arch == "arm" or self.arch == "aarch64":
-            jmp_ins = "b"
-        elif self.arch == "mips" or self.arch == "mips64":
-            if self.pie:
-                jmp_ins = "b"
-            else:
-                jmp_ins = "j"
-        if jmp_to:
-            payload = "{} {}".format(jmp_ins, hex(jmp_to))
-            if len(assembly) != 0:
-                assembly += "\n" + payload
-            else:
-                addr = self.get_next_patch_start_addr() + len(machine_code)
-                shellcode, count = self.ks.asm(payload, addr=addr)
-                machine_code += shellcode
-        patch_start_addr = self.add_patch_in_ehframe(assembly=assembly, machine_code=machine_code)
-        if jmp_to:
-            # fix translation bug of mips jump code: when keystone translates jmp code, it treats the value of argument start as the base address,
-            # rather than the address of jump code.
-            # FYI: shellcode, count = self.ks.asm(assembly, addr=patch_start_addr)
-            if self.arch == "mips" or self.arch == "mips64":
-                next_patch_addr = self.get_next_patch_start_addr()
-                payload = "{} {}".format(jmp_ins, hex(jmp_to))
-                # why - 8? because a nop code will be added automatically after jmp code.
-                self.patch_origin(next_patch_addr - 8, assembly=payload)
-
-        if patch_start_addr == 0:
-            return 0
-        payload = "{} {}".format(jmp_ins, hex(patch_start_addr))
-        self.patch_origin(jmp_from, assembly=payload)
-        return patch_start_addr
-
-    def patch_by_call(self, call_from, assembly="", machine_code=[]):
-        if self.arch != "i386" and self.arch != "amd64":
-            log.error("Sorry, patch_by_call only support x86 architecture!")
-            quit()
-        patch_start_addr = self.add_patch_in_ehframe(assembly=assembly, machine_code=machine_code)
-        if patch_start_addr == 0:
-            return 0
-
-        payload = "call {}".format(hex(patch_start_addr))
-        self.patch_origin(call_from, assembly=payload)
-        return patch_start_addr
-
     def add_constant_in_ehframe(self, string):
         patch_start_addr = self.eh_frame_addr + self.offset
         if PYTHON_VERSION == 3:
@@ -216,61 +275,6 @@ class AwdPwnPatcher:
         self.binary.write(patch_start_addr, string)
         self.offset += len(string)
         return patch_start_addr
-
-    def patch_fmt_by_call(self, call_from):
-        if self.arch != "i386" and self.arch != "amd64":
-            log.error("Sorry, patch_fmt_by_call only support x86 architecture!")
-            quit()
-        fmt_addr = self.add_constant_in_ehframe("%s\x00\x00")
-        patch_start_addr = self.eh_frame_addr + self.offset
-
-        printf_addr = (call_from + 5 + u32(self.binary.read(call_from + 1, 4))) & 0xffffffff
-        if self.bits == 32 and not self.pie:
-            assembly = """
-            mov eax, dword ptr [esp+4]
-            push eax
-            lea eax, dword ptr [{0}]
-            push eax
-            call {1}
-            add esp, 0x8
-            ret
-            """.format(hex(fmt_addr), hex(printf_addr))
-        elif self.bits == 32 and self.pie:
-            assembly = """
-            call {0}
-            mov eax, dword ptr [esp+8]
-            push eax
-            mov eax, dword ptr [esp+4]
-            sub eax, {0}
-            add eax, {1}
-            push eax
-            call {2}
-            add esp, 0xc
-            ret
-            """.format(hex(patch_start_addr + 5), fmt_addr, hex(printf_addr))
-        else:
-            assembly = """
-            mov rsi, rdi
-            lea rdi, qword ptr [{0}]
-            call {1}
-            ret
-            """.format(hex(fmt_addr), hex(printf_addr))
-        self.patch_by_call(call_from, assembly=assembly)
-
-    def save(self, save_path="", fix_eh_frame_flags=True):
-        if fix_eh_frame_flags:
-            self._eh_frame_fix_flags()
-        if len(save_path) != 0:
-            self.binary.save(save_path)
-        else:
-            self.binary.save(self.save_path)
-
-    def get_next_patch_start_addr(self):
-        return self.eh_frame_addr + self.offset
-
-    ###############
-    ### section ###
-    ###############
 
     def _eh_frame_add_execute_permission(self):
         e_phnum = self.binary.header.e_phnum
