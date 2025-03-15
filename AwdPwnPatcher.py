@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # coding=utf-8
 
+from elftools.elf.constants import SH_FLAGS
 from pwn import *
 import keystone
 import ctypes
@@ -9,6 +10,7 @@ import struct
 import sys
 
 PYTHON_VERSION = sys.version_info[0]
+
 
 class AwdPwnPatcher:
     def __init__(self, path, adjust_eh_frame_size=True):
@@ -58,12 +60,12 @@ class AwdPwnPatcher:
                 if self.binary._get_section_name(section) == ".eh_frame":
                     break
             if self.arch == "mips64":
-                self.note_section = self.binary.get_section(i+1)
-                self.ctors_section = self.binary.get_section(i+2)
+                self.note_section = self.binary.get_section(i + 1)
+                self.ctors_section = self.binary.get_section(i + 2)
                 self.offset = self.eh_frame_size + self.note_section.header.sh_size
                 self.eh_frame_next_section = self.ctors_section
             else:
-                self.eh_frame_next_section = self.binary.get_section(i+1)
+                self.eh_frame_next_section = self.binary.get_section(i + 1)
             self.eh_frame_section_header_offset = self.binary._section_offset(i)
             actual_size = self.eh_frame_next_section.header.sh_offset - self.eh_frame_section.header.sh_offset
             self.eh_frame_end_addr = self.eh_frame_addr + self.eh_frame_size
@@ -88,13 +90,13 @@ class AwdPwnPatcher:
             shutil.copy2(self.path, self.save_path)
             self.bin_file = open(self.save_path, "rb+")
             if self.bits == 32:
-                self.bin_file.seek(self.load_segment_header_offset+16)
-                self.bin_file.write(struct.pack(endian_fmt+"I", new_size))
-                self.bin_file.write(struct.pack(endian_fmt+"I", new_size))
+                self.bin_file.seek(self.load_segment_header_offset + 16)
+                self.bin_file.write(struct.pack(endian_fmt + "I", new_size))
+                self.bin_file.write(struct.pack(endian_fmt + "I", new_size))
             else:
-                self.bin_file.seek(self.load_segment_header_offset+32)
-                self.bin_file.write(struct.pack(endian_fmt+"Q", new_size))
-                self.bin_file.write(struct.pack(endian_fmt+"Q", new_size))
+                self.bin_file.seek(self.load_segment_header_offset + 32)
+                self.bin_file.write(struct.pack(endian_fmt + "Q", new_size))
+                self.bin_file.write(struct.pack(endian_fmt + "Q", new_size))
             self.bin_file.close()
             self.binary = ELF(self.save_path)
 
@@ -119,7 +121,7 @@ class AwdPwnPatcher:
 
     def add_patch_in_ehframe(self, assembly="", machine_code=[]):
         patch_start_addr = self.eh_frame_addr + self.offset
-        if len(assembly) != 0 :
+        if len(assembly) != 0:
             shellcode, count = self.ks.asm(assembly, addr=patch_start_addr)
             shellcode = "".join([chr(x) for x in shellcode])
         elif len(machine_code) != 0:
@@ -131,7 +133,7 @@ class AwdPwnPatcher:
             return 0
 
         self.offset += len(shellcode)
-        assert(self.offset <= self.eh_frame_size)
+        assert (self.offset <= self.eh_frame_size)
         if PYTHON_VERSION == 3:
             shellcode = shellcode.encode("latin-1")
         self.binary.write(patch_start_addr, shellcode)
@@ -148,7 +150,7 @@ class AwdPwnPatcher:
         else:
             shellcode = ""
         if end != 0:
-            assert(len(shellcode) <= (end-start))
+            assert (len(shellcode) <= (end - start))
             shellcode = shellcode.ljust(end - start, "\x90")
         if PYTHON_VERSION == 3:
             shellcode = shellcode.encode("latin-1")
@@ -159,7 +161,7 @@ class AwdPwnPatcher:
             jmp_ins = "jmp"
         elif self.arch == "arm" or self.arch == "aarch64":
             jmp_ins = "b"
-        elif self.arch == "mips" or self.arch =="mips64":
+        elif self.arch == "mips" or self.arch == "mips64":
             if self.pie:
                 jmp_ins = "b"
             else:
@@ -181,7 +183,7 @@ class AwdPwnPatcher:
                 next_patch_addr = self.get_next_patch_start_addr()
                 payload = "{} {}".format(jmp_ins, hex(jmp_to))
                 # why - 8? because a nop code will be added automatically after jmp code.
-                self.patch_origin(next_patch_addr-8, assembly=payload)
+                self.patch_origin(next_patch_addr - 8, assembly=payload)
 
         if patch_start_addr == 0:
             return 0
@@ -216,7 +218,7 @@ class AwdPwnPatcher:
         fmt_addr = self.add_constant_in_ehframe("%s\x00\x00")
         patch_start_addr = self.eh_frame_addr + self.offset
 
-        printf_addr = (call_from + 5 + u32(self.binary.read(call_from+1, 4))) & 0xffffffff
+        printf_addr = (call_from + 5 + u32(self.binary.read(call_from + 1, 4))) & 0xffffffff
         if self.bits == 32 and not self.pie:
             assembly = """
             mov eax, dword ptr [esp+4]
@@ -239,7 +241,7 @@ class AwdPwnPatcher:
             call {2}
             add esp, 0xc
             ret
-            """.format(hex(patch_start_addr+5), fmt_addr, hex(printf_addr))
+            """.format(hex(patch_start_addr + 5), fmt_addr, hex(printf_addr))
         else:
             assembly = """
             mov rsi, rdi
@@ -249,10 +251,13 @@ class AwdPwnPatcher:
             """.format(hex(fmt_addr), hex(printf_addr))
         self.patch_by_call(call_from, assembly=assembly)
 
-            
-    def save(self, save_path="", fix_eh_frame_flags=True):
+    def save(self, save_path="",
+             fix_eh_frame_flags=True,
+             eh_frame_add_execute_permission=True):
         if fix_eh_frame_flags:
             self.fix_eh_frame_flags()
+        if eh_frame_add_execute_permission:
+            self.add_execute_permission_to_eh_frame()
         if len(save_path) != 0:
             self.binary.save(save_path)
         else:
@@ -260,6 +265,15 @@ class AwdPwnPatcher:
 
     def get_next_patch_start_addr(self):
         return self.eh_frame_addr + self.offset
+
+    def add_execute_permission_to_eh_frame(self):
+        # 找到.eh_frame节
+        eh_frame_section = self.binary.get_section_by_name('.eh_frame')
+        if eh_frame_section:
+            # 修改节的标志，添加执行权限
+            eh_frame_section['sh_flags'] |= SH_FLAGS.SHF_EXECINSTR
+        else:
+            print(".eh_frame section not found")
 
     def fix_eh_frame_flags(self):
         e_phnum = self.binary.header.e_phnum
@@ -280,4 +294,3 @@ class AwdPwnPatcher:
                 if PYTHON_VERSION == 3:
                     flags = flags.encode("latin-1")
                 self.binary.write(e_phoff + phdr_size * i + p_flags_offset, flags)
-
