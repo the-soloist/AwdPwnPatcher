@@ -1,13 +1,16 @@
 #!/usr/bin/env python
 # coding=utf-8
 
-from elftools.elf.constants import SH_FLAGS
+from elftools.elf.constants import P_FLAGS
+from elftools.elf.elffile import ELFFile
 from pwn import *
 import keystone
 import ctypes
 import shutil
 import struct
 import sys
+import lief
+
 
 PYTHON_VERSION = sys.version_info[0]
 
@@ -251,13 +254,9 @@ class AwdPwnPatcher:
             """.format(hex(fmt_addr), hex(printf_addr))
         self.patch_by_call(call_from, assembly=assembly)
 
-    def save(self, save_path="",
-             fix_eh_frame_flags=True,
-             eh_frame_add_execute_permission=True):
+    def save(self, save_path="", fix_eh_frame_flags=True):
         if fix_eh_frame_flags:
-            self.fix_eh_frame_flags()
-        if eh_frame_add_execute_permission:
-            self.add_execute_permission_to_eh_frame()
+            self._eh_frame_fix_flags()
         if len(save_path) != 0:
             self.binary.save(save_path)
         else:
@@ -266,16 +265,24 @@ class AwdPwnPatcher:
     def get_next_patch_start_addr(self):
         return self.eh_frame_addr + self.offset
 
-    def add_execute_permission_to_eh_frame(self):
-        # 找到.eh_frame节
-        eh_frame_section = self.binary.get_section_by_name('.eh_frame')
-        if eh_frame_section:
-            # 修改节的标志，添加执行权限
-            eh_frame_section['sh_flags'] |= SH_FLAGS.SHF_EXECINSTR
-        else:
-            print(".eh_frame section not found")
+    ###############
+    ### section ###
+    ###############
 
-    def fix_eh_frame_flags(self):
+    def _eh_frame_add_execute_permission(self):
+        e_phnum = self.binary.header.e_phnum
+        e_phoff = self.binary.header.e_phoff
+        phdr_size = 32 if self.bits == 32 else 56
+        p_flags_offset = 24 if self.bits == 32 else 4
+        for i in range(e_phnum):
+            phdr = self.binary.get_segment(i).header
+            if phdr.p_type == "PT_GNU_EH_FRAME":
+                flags = phdr.p_flags | P_FLAGS.PF_X
+                flag_bytes = bytes([flags]) if PYTHON_VERSION == 3 else chr(flags)
+                self.binary.write(e_phoff + phdr_size * i + p_flags_offset, flag_bytes)
+                return  # Exit after patching the eh_frame segment
+
+    def _eh_frame_fix_flags(self):
         e_phnum = self.binary.header.e_phnum
         e_phoff = self.binary.header.e_phoff
         phdr_size = 32 if self.bits == 32 else 56
