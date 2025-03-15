@@ -9,7 +9,6 @@ import ctypes
 import shutil
 import struct
 import sys
-import lief
 
 
 PYTHON_VERSION = sys.version_info[0]
